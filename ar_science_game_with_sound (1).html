@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Science Game - เรียนรู้เรื่องดิน</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe Camera Utils & Face Mesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <!-- Tone.js for Sound Effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap');
+        body { font-family: 'Kanit', sans-serif; }
+        
+        .glass {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        /* Progress Bar Animation */
+        .progress-fill {
+            transition: height 0.1s ease-out;
+        }
+
+        /* Floating Animation for Main Menu */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-15px); }
+            100% { transform: translateY(0px); }
+        }
+        .animate-float { animation: float 4s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen w-full overflow-hidden relative">
+
+    <!-- 1. Video (Hidden for MediaPipe Processing) -->
+    <video id="webcam" class="hidden" autoplay playsinline muted></video>
+
+    <!-- 2. Main AR Canvas (Where everything is drawn) -->
+    <canvas id="ar-canvas" class="absolute top-0 left-0 w-full h-full object-cover z-0"></canvas>
+
+    <!-- 3. UI Layer (Z-index above Canvas) -->
+    <div id="ui-layer" class="absolute top-0 left-0 w-full h-full z-10 pointer-events-none flex flex-col justify-between">
+        
+        <!-- Header: Stats & Sound Toggle -->
+        <div id="game-header" class="w-full p-4 flex justify-between items-start opacity-0 transition-opacity duration-500 relative">
+            <div class="glass px-4 py-2 rounded-2xl flex flex-col items-center">
+                <span class="text-xs text-slate-300 uppercase tracking-wider">Score</span>
+                <span id="score-display" class="text-2xl md:text-3xl font-bold text-amber-400">0</span>
+            </div>
+            
+            <!-- Stage Info -->
+            <div class="glass px-6 py-2 rounded-2xl text-center">
+                <span id="stage-name" class="block text-sm md:text-base font-bold text-emerald-400">Stage 1</span>
+                <span class="text-xs text-slate-300">เวลา: <span id="time-display" class="font-bold text-white text-lg">60</span> วิ</span>
+            </div>
+
+            <div class="glass px-4 py-2 rounded-2xl flex flex-col items-center">
+                <span class="text-xs text-slate-300 uppercase tracking-wider">Combo</span>
+                <span id="combo-display" class="text-2xl md:text-3xl font-bold text-sky-400">x1</span>
+            </div>
+
+            <!-- Sound Toggle Button -->
+            <button id="sound-toggle-btn" class="absolute top-4 right-4 translate-y-[120%] glass p-3 rounded-full pointer-events-auto hover:bg-white/10 transition-colors">
+                <span id="sound-icon" class="text-xl">🔊</span>
+            </button>
+        </div>
+
+        <!-- Question Area -->
+        <div id="question-container" class="w-full max-w-4xl mx-auto px-4 text-center opacity-0 transition-opacity duration-500 transform -translate-y-4">
+            <div class="glass-panel p-4 md:p-8 rounded-3xl inline-block shadow-lg shadow-black/50 border border-white/30 bg-slate-900/80">
+                <h2 id="question-text" class="text-xl md:text-3xl font-bold leading-tight drop-shadow-md text-white">
+                    <!-- Question goes here -->
+                </h2>
+            </div>
+        </div>
+
+        <!-- Choices Area -->
+        <div id="choices-container" class="w-full px-4 md:px-12 pb-8 flex justify-between items-end opacity-0 transition-opacity duration-500">
+            
+            <!-- Left Choice -->
+            <div class="flex flex-col items-center pointer-events-auto">
+                <div class="h-32 md:h-48 w-4 bg-slate-800/80 rounded-full mb-4 overflow-hidden border border-white/20 relative shadow-inner">
+                    <div id="left-progress" class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-sky-600 to-sky-400 progress-fill rounded-full shadow-[0_0_10px_rgba(56,189,248,0.8)]" style="height: 0%;"></div>
+                </div>
+                <div id="left-choice" class="glass-panel p-4 md:p-6 rounded-3xl w-40 md:w-64 text-center transition-all duration-300 hover:scale-105 cursor-pointer bg-slate-800/90 border-2 border-transparent">
+                    <!-- Content -->
+                </div>
+                <div class="mt-2 text-xs md:text-sm font-semibold text-sky-300 text-center bg-black/50 px-3 py-1 rounded-full backdrop-blur-sm">👈 เอียงซ้าย</div>
+            </div>
+
+            <!-- Hint Button (Center Bottom) -->
+            <button id="hint-btn" class="glass px-6 py-3 rounded-full text-sm md:text-base font-bold text-amber-300 hover:bg-white/10 pointer-events-auto transition-colors mb-4 border border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.3)]">
+                💡 ดูคำใบ้
+            </button>
+
+            <!-- Right Choice -->
+            <div class="flex flex-col items-center pointer-events-auto">
+                <div class="h-32 md:h-48 w-4 bg-slate-800/80 rounded-full mb-4 overflow-hidden border border-white/20 relative shadow-inner">
+                    <div id="right-progress" class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-rose-600 to-rose-400 progress-fill rounded-full shadow-[0_0_10px_rgba(244,63,94,0.8)]" style="height: 0%;"></div>
+                </div>
+                <div id="right-choice" class="glass-panel p-4 md:p-6 rounded-3xl w-40 md:w-64 text-center transition-all duration-300 hover:scale-105 cursor-pointer bg-slate-800/90 border-2 border-transparent">
+                    <!-- Content -->
+                </div>
+                <div class="mt-2 text-xs md:text-sm font-semibold text-rose-300 text-center bg-black/50 px-3 py-1 rounded-full backdrop-blur-sm">เอียงขวา 👉</div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 4. Modals (Start, Pre-game, Summary, End) -->
+    
+    <!-- Start Screen -->
+    <div id="start-screen" class="absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center bg-slate-900/90 backdrop-blur-sm">
+        <div class="glass-panel p-8 md:p-12 rounded-3xl max-w-lg w-full text-center mx-4 animate-float border-emerald-500/30 border-2">
+            <div class="text-6xl mb-6 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]">🌱</div>
+            <h1 class="text-3xl md:text-4xl font-bold text-emerald-400 mb-2 drop-shadow-md">AR Science Game</h1>
+            <h2 class="text-xl md:text-2xl font-semibold mb-6 text-white">เรียนรู้เรื่อง "ดิน"</h2>
+            <p class="text-slate-300 mb-8 text-sm md:text-base bg-black/30 p-4 rounded-xl">
+                เปิดกล้องและใช้ <b>การเอียงศีรษะ</b> ซ้ายหรือขวา<br>เพื่อเลือกคำตอบที่ถูกต้อง
+            </p>
+            <div id="loading-text" class="text-amber-400 mb-4 animate-pulse font-semibold">กำลังเตรียมกล้องและ AI...</div>
+            <button id="start-btn" class="hidden w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-xl hover:from-emerald-400 hover:to-teal-400 transition-all shadow-[0_0_20px_rgba(16,185,129,0.4)]">
+                เข้าสู่บทเรียน ➔
+            </button>
+            <button id="fallback-btn" class="mt-4 text-sm text-slate-400 underline hover:text-white transition-colors">
+                กล้องใช้งานไม่ได้? เล่นโหมดคลิกเมาส์
+            </button>
+        </div>
+    </div>
+
+    <!-- Pre-game Knowledge Screen -->
+    <div id="knowledge-screen" class="hidden absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center bg-slate-900/95 backdrop-blur-md">
+        <div class="glass-panel p-6 md:p-10 rounded-3xl max-w-2xl w-full mx-4 overflow-y-auto max-h-[90vh] border-amber-500/30 border-2">
+            <h2 class="text-2xl md:text-3xl font-bold text-amber-400 mb-4 border-b border-white/20 pb-2">📚 สรุปความรู้ก่อนลุยด่าน</h2>
+            
+            <div class="space-y-6 text-sm md:text-base text-slate-200">
+                <div class="bg-black/20 p-4 rounded-xl">
+                    <h3 class="font-bold text-lg text-emerald-300 mb-2">1. ส่วนประกอบของดิน (ดินร่วนที่สมบูรณ์)</h3>
+                    <ul class="list-disc pl-5 space-y-1">
+                        <li><b>อนินทรียวัตถุ (เศษหิน/แร่ธาตุ):</b> 45% (มากที่สุด)</li>
+                        <li><b>น้ำ:</b> 25%</li>
+                        <li><b>อากาศ:</b> 25%</li>
+                        <li><b class="text-amber-300">อินทรียวัตถุ (ฮิวมัส):</b> 5% (น้อยสุดแต่สำคัญมาก)</li>
+                    </ul>
+                </div>
+
+                <div class="bg-black/20 p-4 rounded-xl">
+                    <h3 class="font-bold text-lg text-emerald-300 mb-2">2. ชนิดของดิน</h3>
+                    <ul class="list-disc pl-5 space-y-1">
+                        <li><b>ดินเหนียว:</b> จับตัวแน่น อุ้มน้ำดีเยี่ยม (น้ำซึมผ่านยาก)</li>
+                        <li><b class="text-emerald-300">ดินร่วน:</b> โปร่งกำลังดี มีฮิวมัสเยอะ <b>เหมาะเพาะปลูกสุด</b></li>
+                        <li><b>ดินทราย:</b> ไม่จับตัว น้ำซึมผ่านไวมาก เก็บน้ำไม่อยู่</li>
+                    </ul>
+                </div>
+            </div>
+
+            <button id="ready-btn" class="mt-8 w-full py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-xl hover:from-amber-400 hover:to-orange-400 transition-all shadow-[0_0_20px_rgba(245,158,11,0.4)]">
+                พร้อมแล้ว ลุยเลย! 🎮
+            </button>
+        </div>
+    </div>
+
+    <!-- Stage Summary Screen -->
+    <div id="stage-summary-screen" class="hidden absolute top-0 left-0 w-full h-full z-40 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm pointer-events-auto">
+        <div class="glass-panel p-8 rounded-3xl max-w-lg w-full text-center mx-4 border-emerald-500/50 border-2 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+            <h2 class="text-3xl font-bold text-emerald-400 mb-4 drop-shadow-md">ด่านต่อไป! 🎉</h2>
+            <p id="stage-summary-text" class="text-lg text-slate-200 mb-6 leading-relaxed bg-black/30 p-4 rounded-xl">
+                <!-- Summary Text -->
+            </p>
+            <div class="text-sm font-bold text-amber-300 mb-6 bg-amber-900/30 py-2 rounded-full inline-block px-6">
+                ⏳ ได้รับโบนัสเวลา +20 วินาที
+            </div>
+            <button id="next-stage-btn" class="w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold text-lg hover:bg-emerald-400 transition-colors shadow-lg">
+                ลุยต่อเลย!
+            </button>
+        </div>
+    </div>
+
+    <!-- Hint Modal -->
+    <div id="hint-modal" class="hidden absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
+        <div class="glass-panel p-6 rounded-3xl max-w-sm w-full mx-4 text-center border-amber-500/50 border shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+            <h3 class="text-xl font-bold text-amber-400 mb-4">💡 คำใบ้</h3>
+            <p id="hint-text" class="text-slate-200 mb-6 leading-relaxed">
+                <!-- Hint goes here -->
+            </p>
+            <button id="close-hint-btn" class="px-8 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 transition-colors font-semibold text-white">เข้าใจแล้ว</button>
+        </div>
+    </div>
+
+    <!-- Game Over / Victory Screen -->
+    <div id="end-screen" class="hidden absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center bg-slate-900/95 backdrop-blur-md">
+        <div class="glass-panel p-8 md:p-12 rounded-3xl max-w-md w-full text-center mx-4 border-sky-500/30 border-2">
+            <div id="end-icon" class="text-6xl mb-4 drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">🏆</div>
+            <h1 id="end-title" class="text-3xl font-bold text-emerald-400 mb-2">Congratulations!</h1>
+            <p id="end-subtitle" class="text-slate-300 mb-6">เรียนรู้เรื่องดินสำเร็จแล้ว</p>
+            
+            <div class="space-y-4 mb-8">
+                <div class="glass p-4 rounded-xl flex justify-between items-center bg-black/40">
+                    <span class="text-slate-300 font-semibold">คะแนนรวม:</span>
+                    <span id="final-score" class="text-3xl font-bold text-amber-400 drop-shadow-md">0</span>
+                </div>
+                <div class="glass p-4 rounded-xl flex justify-between items-center bg-black/40">
+                    <span class="text-slate-300 font-semibold">ตอบถูกติดกันสูงสุด:</span>
+                    <span id="final-combo" class="text-2xl font-bold text-sky-400">0</span>
+                </div>
+            </div>
+
+            <button id="restart-btn" class="w-full py-4 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-500 text-white font-bold text-xl hover:from-sky-400 hover:to-blue-400 transition-all shadow-[0_0_20px_rgba(14,165,233,0.4)]">
+                เล่นอีกครั้ง 🔄
+            </button>
+        </div>
+    </div>
+
+    <!-- 5. Status / Debug UI -->
+    <div class="absolute bottom-2 left-2 z-20 text-[10px] text-slate-400 font-mono bg-black/50 px-2 py-1 rounded">
+        FPS: <span id="fps-counter">0</span> | MODE: <span id="input-mode">AR</span>
+    </div>
+
+    <script>
+        // --- 0. Audio System Setup (Tone.js) ---
+        const audioState = {
+            muted: false,
+            initialized: false
+        };
+
+        // Synths
+        let mainSynth, polySynth, successSynth, errorSynth;
+
+        async function initAudio() {
+            if (audioState.initialized) return;
+            
+            // Start audio context upon user gesture
+            await Tone.start();
+            
+            // Reverb to make sounds less harsh
+            const reverb = new Tone.Reverb(1.5).toDestination();
+            
+            mainSynth = new Tone.Synth().connect(reverb);
+            mainSynth.volume.value = -10;
+
+            polySynth = new Tone.PolySynth(Tone.Synth).connect(reverb);
+            polySynth.volume.value = -12;
+
+            successSynth = new Tone.Synth({
+                oscillator: { type: 'triangle' },
+                envelope: { attack: 0.05, decay: 0.1, sustain: 0.3, release: 1 }
+            }).toDestination();
+            successSynth.volume.value = -8;
+
+            errorSynth = new Tone.MembraneSynth().toDestination();
+            errorSynth.volume.value = -10;
+
+            audioState.initialized = true;
+        }
+
+        const sfx = {
+            playClick: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                mainSynth.triggerAttackRelease("C6", "32n");
+            },
+            playHover: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                mainSynth.triggerAttackRelease("G5", "64n");
+            },
+            playCorrect: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                const now = Tone.now();
+                successSynth.triggerAttackRelease("C5", "8n", now);
+                successSynth.triggerAttackRelease("E5", "8n", now + 0.1);
+                successSynth.triggerAttackRelease("G5", "4n", now + 0.2);
+                successSynth.triggerAttackRelease("C6", "2n", now + 0.3);
+            },
+            playWrong: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                const now = Tone.now();
+                errorSynth.triggerAttackRelease("E2", "8n", now);
+                mainSynth.triggerAttackRelease("Eb3", "8n", now);
+                mainSynth.triggerAttackRelease("C3", "4n", now + 0.15);
+            },
+            playStageClear: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                const now = Tone.now();
+                polySynth.triggerAttackRelease(["C4", "E4", "G4"], "4n", now);
+                polySynth.triggerAttackRelease(["F4", "A4", "C5"], "4n", now + 0.3);
+                polySynth.triggerAttackRelease(["G4", "B4", "D5"], "4n", now + 0.6);
+                polySynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "2n", now + 0.9);
+            },
+            playGameOver: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                const now = Tone.now();
+                polySynth.triggerAttackRelease(["G3", "Bb3"], "4n", now);
+                polySynth.triggerAttackRelease(["Gb3", "A3"], "4n", now + 0.4);
+                polySynth.triggerAttackRelease(["F3", "Ab3"], "4n", now + 0.8);
+                polySynth.triggerAttackRelease(["E3", "G3"], "1n", now + 1.2);
+            },
+            playVictory: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                const now = Tone.now();
+                polySynth.triggerAttackRelease(["C5", "E5", "G5"], "8n", now);
+                polySynth.triggerAttackRelease(["C5", "E5", "G5"], "8n", now + 0.2);
+                polySynth.triggerAttackRelease(["C5", "E5", "G5"], "4n", now + 0.4);
+                polySynth.triggerAttackRelease(["F5", "A5", "C6", "F6"], "1n", now + 0.8);
+            },
+            playTick: () => {
+                if (audioState.muted || !audioState.initialized) return;
+                mainSynth.triggerAttackRelease("C7", "64n", Tone.now(), 0.1); // low volume tick
+            }
+        };
+
+        // Sound Toggle Logic
+        document.getElementById('sound-toggle-btn').addEventListener('click', (e) => {
+            audioState.muted = !audioState.muted;
+            document.getElementById('sound-icon').innerText = audioState.muted ? '🔇' : '🔊';
+            if(!audioState.muted) {
+                initAudio(); // Ensure initialized if unmuted
+                sfx.playClick();
+            }
+        });
+
+        // --- 1. Game Data & States ---
+        const GAME_STAGES = [
+            {
+                name: "Stage 1: ส่วนประกอบของดิน",
+                color: "bg-amber-600",
+                questions: [
+                    {
+                        q: "ส่วนประกอบใดมีปริมาณมากที่สุดในดินร่วนที่เหมาะสมต่อการปลูกพืช? (45%)",
+                        left: `<img src="https://lh3.googleusercontent.com/d/1_V-3jo5SYPvkCY4HUuoVcB4rcuyNU_xv" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">เศษหินและแร่ธาตุ</span>`,
+                        right: `<span class="block text-4xl md:text-7xl mt-4 mb-2 drop-shadow-lg">💧</span><span class="block text-sm md:text-xl font-bold text-white">น้ำ (25%)</span>`,
+                        ans: "left"
+                    },
+                    {
+                        q: "ฮิวมัส (Humus) เกิดจากการทับถมของสิ่งใด?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/1a9Wudu0YkSp8mL5iRZwxQNf7-WyBEKT5" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ซากพืชซากสัตว์</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/1_V-3jo5SYPvkCY4HUuoVcB4rcuyNU_xv" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">เศษหินผุพัง</span>`,
+                        ans: "left"
+                    },
+                    {
+                        q: "ส่วนประกอบที่เป็นอินทรียวัตถุในดิน มีชื่อเรียกว่าอะไร?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/1nSwVpz4spoyn06LPMbxaGjWfCTmuc7Sh" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ฮิวมัส</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/1PgaSCiNQkcGNwD0byV6d-VIfecwOOmBp" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">แร่ธาตุ</span>`,
+                        ans: "left"
+                    }
+                ],
+                summary: "ยอดเยี่ยม! ดินที่อุดมสมบูรณ์จะประกอบด้วย เศษหิน/แร่ธาตุ 45%, น้ำ 25%, อากาศ 25% และ ฮิวมัส (อินทรียวัตถุ) 5% ซึ่งเป็นสัดส่วนที่เหมาะกับพืชที่สุด"
+            },
+            {
+                name: "Stage 2: จำแนกชนิดของดิน",
+                color: "bg-emerald-600",
+                questions: [
+                    {
+                        q: "ดินชนิดใดเนื้อละเอียดที่สุด จับตัวกันแน่น และอุ้มน้ำได้ดีมาก?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/16OJcqgCS_W4E4a33Zk5jNW4m7321mJpl" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินเหนียว</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/1mm3sXV97edt-6oIYsuldeHJC_wL3WwLk" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินร่วน</span>`,
+                        ans: "left"
+                    },
+                    {
+                        q: "ดินชนิดใดมีเนื้อหยาบ ไม่จับตัวกัน น้ำและอากาศซึมผ่านได้รวดเร็วมาก?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/1-V3zBWGjXMGJcpNTiLG1X0KUyr3IJoMf" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินทราย</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/16OJcqgCS_W4E4a33Zk5jNW4m7321mJpl" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินเหนียว</span>`,
+                        ans: "left"
+                    },
+                    {
+                        q: "ดินชนิดใดมีเนื้อนุ่ม โปร่ง มีฮิวมัสมาก เหมาะสมกับการเพาะปลูกมากที่สุด?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/1mm3sXV97edt-6oIYsuldeHJC_wL3WwLk" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินร่วน</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/1-V3zBWGjXMGJcpNTiLG1X0KUyr3IJoMf" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินทราย</span>`,
+                        ans: "left"
+                    }
+                ],
+                summary: "เก่งมาก! เราจำแนกดินได้ 3 ชนิดหลักคือ ดินเหนียว(อุ้มน้ำดีเยี่ยม), ดินร่วน(ร่วนซุยพอดี ปลูกพืชดีสุด), และดินทราย(น้ำซึมผ่านง่าย ไม่เก็บน้ำ)"
+            },
+            {
+                name: "Stage 3: การประยุกต์ใช้ปลูกพืช",
+                color: "bg-sky-600",
+                questions: [
+                    {
+                        q: "พืชที่ต้องการน้ำมาก เช่น 'ข้าว' หรือ 'บัว' ควรปลูกในดินชนิดใด?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/16OJcqgCS_W4E4a33Zk5jNW4m7321mJpl" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินเหนียว</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/1-V3zBWGjXMGJcpNTiLG1X0KUyr3IJoMf" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินทราย</span>`,
+                        ans: "left"
+                    },
+                    {
+                        q: "พืชที่ทนแล้งและไม่ต้องการน้ำขัง เช่น 'กระบองเพชร' ควรปลูกในดินชนิดใด?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/1-V3zBWGjXMGJcpNTiLG1X0KUyr3IJoMf" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินทราย</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/1mm3sXV97edt-6oIYsuldeHJC_wL3WwLk" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินร่วน</span>`,
+                        ans: "left"
+                    },
+                    {
+                        q: "พืชผักสวนครัว และไม้ผลส่วนใหญ่ เจริญเติบโตได้ดีที่สุดในดินชนิดใด?",
+                        left: `<img src="https://lh3.googleusercontent.com/d/1mm3sXV97edt-6oIYsuldeHJC_wL3WwLk" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินร่วน</span>`,
+                        right: `<img src="https://lh3.googleusercontent.com/d/16OJcqgCS_W4E4a33Zk5jNW4m7321mJpl" class="w-16 h-16 md:w-32 md:h-32 mx-auto rounded-xl shadow-lg border-2 border-white/20 mb-2 object-cover bg-black/20"><span class="block text-sm md:text-xl font-bold mt-2 text-white">ดินเหนียว</span>`,
+                        ans: "left"
+                    }
+                ],
+                summary: "สมบูรณ์แบบ! การเลือกชนิดดินให้ตรงกับความต้องการของพืช จะทำให้พืชเจริญเติบโตได้อย่างเต็มที่และให้ผลผลิตที่ดีเยี่ยม"
+            }
+        ];
+
+        // System States
+        const state = {
+            isPlaying: false,
+            currentStageIdx: 0,
+            currentQuestionIdx: 0,
+            score: 0,
+            combo: 0,
+            maxCombo: 0,
+            timeLeft: 60,
+            timerInterval: null,
+            
+            // Interaction States
+            tiltDirection: 'center', // 'left', 'right', 'center'
+            tiltHoldTime: 0,
+            tiltThreshold: 75, 
+            isProcessingAnswer: false,
+            inputMode: 'AR', // 'AR' or 'Mouse'
+            
+            // Rendering & AR
+            faceMeshResults: null,
+            lastFrameTime: 0,
+            fps: 0,
+            videoWidth: 1280,
+            videoHeight: 720
+        };
+
+        // DOM Elements Map
+        const DOM = {
+            video: document.getElementById('webcam'),
+            canvas: document.getElementById('ar-canvas'),
+            ctx: document.getElementById('ar-canvas').getContext('2d'),
+            
+            // Screens
+            startScreen: document.getElementById('start-screen'),
+            knowledgeScreen: document.getElementById('knowledge-screen'),
+            stageSummaryScreen: document.getElementById('stage-summary-screen'),
+            endScreen: document.getElementById('end-screen'),
+            
+            // UI Components
+            header: document.getElementById('game-header'),
+            qContainer: document.getElementById('question-container'),
+            cContainer: document.getElementById('choices-container'),
+            qText: document.getElementById('question-text'),
+            leftChoice: document.getElementById('left-choice'),
+            rightChoice: document.getElementById('right-choice'),
+            leftProgress: document.getElementById('left-progress'),
+            rightProgress: document.getElementById('right-progress'),
+            
+            // Stats
+            scoreDisplay: document.getElementById('score-display'),
+            comboDisplay: document.getElementById('combo-display'),
+            timeDisplay: document.getElementById('time-display'),
+            stageName: document.getElementById('stage-name'),
+            fpsCounter: document.getElementById('fps-counter'),
+            inputMode: document.getElementById('input-mode'),
+            
+            // Buttons
+            startBtn: document.getElementById('start-btn'),
+            readyBtn: document.getElementById('ready-btn'),
+            fallbackBtn: document.getElementById('fallback-btn'),
+            nextStageBtn: document.getElementById('next-stage-btn'),
+            restartBtn: document.getElementById('restart-btn'),
+            hintBtn: document.getElementById('hint-btn'),
+            
+            // Hint Modal
+            hintModal: document.getElementById('hint-modal'),
+            hintText: document.getElementById('hint-text'),
+            closeHintBtn: document.getElementById('close-hint-btn'),
+            loadingText: document.getElementById('loading-text')
+        };
+
+        // --- 2. Initialization & MediaPipe Setup ---
+        
+        function resizeCanvas() {
+            DOM.canvas.width = window.innerWidth;
+            DOM.canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let faceMesh;
+        let camera;
+
+        async function initAR() {
+            try {
+                faceMesh = new FaceMesh({locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+                }});
+
+                faceMesh.setOptions({
+                    maxNumFaces: 1,
+                    refineLandmarks: false,
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.6
+                });
+
+                faceMesh.onResults(onResults);
+
+                camera = new Camera(DOM.video, {
+                    onFrame: async () => {
+                        try {
+                            if (DOM.video && DOM.video.readyState >= 2) {
+                                await faceMesh.send({image: DOM.video});
+                            }
+                        } catch (err) {
+                            console.warn("MediaPipe frame processing skipped:", err);
+                        }
+                    },
+                    width: 1280,
+                    height: 720
+                });
+
+                await camera.start();
+                
+                DOM.loadingText.style.display = 'none';
+                DOM.startBtn.classList.remove('hidden');
+                
+                requestAnimationFrame(drawLoop);
+
+            } catch (error) {
+                console.error("Camera setup failed:", error);
+                DOM.loadingText.innerText = "ไม่สามารถเปิดกล้องได้ กรุณาใช้โหมดคลิกเมาส์";
+                DOM.startBtn.classList.add('hidden');
+                state.inputMode = 'Mouse';
+                DOM.inputMode.innerText = 'MOUSE/TOUCH';
+            }
+        }
+
+        // Initialize AR immediately in background
+        initAR();
+
+        // --- 3. Game Mechanics ---
+
+        let lastZone = 'center';
+        function updateZoneVisuals(zone) {
+            // Reset visuals
+            DOM.leftChoice.classList.remove('ring-4', 'ring-emerald-400', 'scale-110', 'bg-white/20');
+            DOM.rightChoice.classList.remove('ring-4', 'ring-emerald-400', 'scale-110', 'bg-white/20');
+            DOM.leftChoice.classList.add('bg-slate-800/90', 'border-transparent');
+            DOM.rightChoice.classList.add('bg-slate-800/90', 'border-transparent');
+            DOM.leftProgress.style.height = '0%';
+            DOM.rightProgress.style.height = '0%';
+
+            if (zone === 'left') {
+                DOM.leftChoice.classList.add('ring-4', 'ring-emerald-400', 'scale-110', 'bg-white/20', 'border-emerald-400');
+                DOM.leftChoice.classList.remove('bg-slate-800/90', 'border-transparent');
+                DOM.leftProgress.style.height = `${(state.tiltHoldTime / state.tiltThreshold) * 100}%`;
+                if(lastZone !== 'left') sfx.playHover(); // Sound on entering zone
+            } else if (zone === 'right') {
+                DOM.rightChoice.classList.add('ring-4', 'ring-emerald-400', 'scale-110', 'bg-white/20', 'border-emerald-400');
+                DOM.rightChoice.classList.remove('bg-slate-800/90', 'border-transparent');
+                DOM.rightProgress.style.height = `${(state.tiltHoldTime / state.tiltThreshold) * 100}%`;
+                if(lastZone !== 'right') sfx.playHover(); // Sound on entering zone
+            }
+            lastZone = zone;
+        }
+
+        function loadQuestion() {
+            if (state.currentStageIdx >= GAME_STAGES.length) {
+                endGame(true);
+                return;
+            }
+
+            const stage = GAME_STAGES[state.currentStageIdx];
+            if (state.currentQuestionIdx >= stage.questions.length) {
+                showStageSummary(stage.summary);
+                return;
+            }
+
+            const q = stage.questions[state.currentQuestionIdx];
+            
+            const isSwapped = Math.random() > 0.5;
+            q.actualAns = isSwapped ? (q.ans === 'left' ? 'right' : 'left') : q.ans;
+            
+            DOM.qText.innerHTML = q.q;
+            DOM.leftChoice.innerHTML = isSwapped ? q.right : q.left;
+            DOM.rightChoice.innerHTML = isSwapped ? q.left : q.right;
+
+            DOM.stageName.innerText = stage.name;
+            DOM.stageName.className = `block text-sm md:text-base font-bold ${stage.color.replace('bg-', 'text-')}`;
+
+            state.isProcessingAnswer = false;
+            state.tiltHoldTime = 0;
+            state.tiltDirection = 'center';
+            updateZoneVisuals('center');
+            
+            DOM.header.classList.remove('opacity-0');
+            DOM.qContainer.classList.remove('opacity-0', '-translate-y-4');
+            DOM.cContainer.classList.remove('opacity-0');
+        }
+
+        function checkAnswer(selectedSide) {
+            if (state.isProcessingAnswer) return;
+            state.isProcessingAnswer = true;
+
+            const stage = GAME_STAGES[state.currentStageIdx];
+            const q = stage.questions[state.currentQuestionIdx];
+            const isCorrect = (selectedSide === q.actualAns);
+
+            const targetChoice = selectedSide === 'left' ? DOM.leftChoice : DOM.rightChoice;
+            
+            if (isCorrect) {
+                targetChoice.classList.replace('bg-white/20', 'bg-emerald-500');
+                targetChoice.classList.add('shadow-[0_0_30px_rgba(16,185,129,0.8)]');
+                
+                sfx.playCorrect(); // <-- Play Correct Sound
+
+                state.combo++;
+                if (state.combo > state.maxCombo) state.maxCombo = state.combo;
+                const multiplier = Math.min(state.combo, 3);
+                state.score += 100 * multiplier;
+                
+                createParticles(selectedSide === 'left' ? 25 : 75, 50, '#10b981'); 
+            } else {
+                targetChoice.classList.replace('bg-white/20', 'bg-rose-600');
+                targetChoice.classList.replace('ring-emerald-400', 'ring-rose-500');
+                targetChoice.classList.add('shadow-[0_0_30px_rgba(225,29,72,0.8)]');
+                
+                sfx.playWrong(); // <-- Play Wrong Sound
+
+                state.combo = 0;
+                createParticles(selectedSide === 'left' ? 25 : 75, 50, '#f43f5e'); 
+                
+                setTimeout(() => {
+                    showHint("พยายามเข้านะ! ทบทวนความรู้เกี่ยวกับคุณสมบัติของดินอีกครั้ง");
+                }, 800);
+            }
+
+            DOM.scoreDisplay.innerText = state.score;
+            DOM.comboDisplay.innerText = `x${Math.max(1, state.combo)}`;
+
+            setTimeout(() => {
+                targetChoice.classList.remove('bg-emerald-500', 'bg-rose-600', 'shadow-[0_0_30px_rgba(16,185,129,0.8)]', 'shadow-[0_0_30px_rgba(225,29,72,0.8)]');
+                state.currentQuestionIdx++;
+                loadQuestion();
+            }, 1500);
+        }
+
+        function showStageSummary(summaryText) {
+            clearInterval(state.timerInterval);
+            DOM.stageSummaryScreen.classList.remove('hidden');
+            document.getElementById('stage-summary-text').innerText = summaryText;
+            sfx.playStageClear(); // <-- Play Stage Clear Sound
+        }
+
+        function nextStage() {
+            sfx.playClick();
+            DOM.stageSummaryScreen.classList.add('hidden');
+            state.currentStageIdx++;
+            state.currentQuestionIdx = 0;
+            state.timeLeft += 20; 
+            DOM.timeDisplay.innerText = state.timeLeft;
+            startTimer();
+            loadQuestion();
+        }
+
+        function startTimer() {
+            clearInterval(state.timerInterval);
+            state.timerInterval = setInterval(() => {
+                if (!state.isPlaying) return;
+                
+                state.timeLeft--;
+                DOM.timeDisplay.innerText = state.timeLeft;
+                
+                if (state.timeLeft <= 10) {
+                    DOM.timeDisplay.classList.add('text-rose-500', 'animate-pulse');
+                    sfx.playTick(); // <-- Play low tick when time is running out
+                } else {
+                    DOM.timeDisplay.classList.remove('text-rose-500', 'animate-pulse');
+                }
+
+                if (state.timeLeft <= 0) {
+                    endGame(false);
+                }
+            }, 1000);
+        }
+
+        function endGame(isVictory) {
+            state.isPlaying = false;
+            clearInterval(state.timerInterval);
+            
+            DOM.header.classList.add('opacity-0');
+            DOM.qContainer.classList.add('opacity-0');
+            DOM.cContainer.classList.add('opacity-0');
+
+            DOM.endScreen.classList.remove('hidden');
+            document.getElementById('end-icon').innerText = isVictory ? '🏆' : '⏰';
+            document.getElementById('end-title').innerText = isVictory ? 'ยอดเยี่ยมมาก!' : 'หมดเวลา!';
+            document.getElementById('end-subtitle').innerText = isVictory ? 'คุณมีความเข้าใจเรื่องดินเป็นอย่างดี' : 'พยายามใหม่อีกครั้งนะ';
+            
+            document.getElementById('final-score').innerText = state.score;
+            document.getElementById('final-combo').innerText = state.maxCombo;
+
+            // <-- Play End Game Sounds
+            if (isVictory) {
+                sfx.playVictory();
+            } else {
+                sfx.playGameOver();
+            }
+        }
+
+        function showHint(customText = null) {
+            sfx.playClick();
+            const hints = [
+                "ดินร่วนมีสัดส่วน อนินทรียวัตถุ 45%, น้ำ 25%, อากาศ 25%, อินทรียวัตถุ 5%",
+                "ฮิวมัส คือซากพืชซากสัตว์ที่เน่าเปื่อย ช่วยให้ดินร่วนซุย",
+                "ดินเหนียวอุ้มน้ำดีที่สุด เหมาะปลูกข้าว",
+                "ดินทรายระบายน้ำเร็วที่สุด เหมาะปลูกพืชทนแล้ง"
+            ];
+            const text = customText || hints[Math.floor(Math.random() * hints.length)];
+            DOM.hintText.innerText = text;
+            DOM.hintModal.classList.remove('hidden');
+        }
+
+        // --- 4. Event Listeners ---
+
+        DOM.startBtn.addEventListener('click', async () => {
+            await initAudio(); // Must wait for user gesture to start AudioContext
+            sfx.playClick();
+            DOM.startScreen.classList.add('hidden');
+            DOM.knowledgeScreen.classList.remove('hidden');
+        });
+
+        DOM.readyBtn.addEventListener('click', () => {
+            sfx.playClick();
+            DOM.knowledgeScreen.classList.add('hidden');
+            startGame();
+        });
+
+        DOM.fallbackBtn.addEventListener('click', async () => {
+            await initAudio();
+            sfx.playClick();
+            state.inputMode = 'Mouse';
+            DOM.inputMode.innerText = 'MOUSE/TOUCH';
+            DOM.startScreen.classList.add('hidden');
+            DOM.knowledgeScreen.classList.remove('hidden');
+            
+            DOM.leftChoice.addEventListener('click', () => { if(state.isPlaying) checkAnswer('left'); });
+            DOM.rightChoice.addEventListener('click', () => { if(state.isPlaying) checkAnswer('right'); });
+            DOM.leftChoice.classList.add('hover:ring-4', 'hover:ring-sky-400');
+            DOM.rightChoice.classList.add('hover:ring-4', 'hover:ring-rose-400');
+        });
+
+        DOM.nextStageBtn.addEventListener('click', nextStage);
+
+        DOM.restartBtn.addEventListener('click', () => {
+            sfx.playClick();
+            DOM.endScreen.classList.add('hidden');
+            startGame();
+        });
+
+        DOM.hintBtn.addEventListener('click', () => showHint());
+        DOM.closeHintBtn.addEventListener('click', () => {
+            sfx.playClick();
+            DOM.hintModal.classList.add('hidden');
+        });
+
+        function startGame() {
+            state.score = 0;
+            state.combo = 0;
+            state.maxCombo = 0;
+            state.timeLeft = 60;
+            state.currentStageIdx = 0;
+            state.currentQuestionIdx = 0;
+            state.isPlaying = true;
+            
+            DOM.scoreDisplay.innerText = "0";
+            DOM.comboDisplay.innerText = "x1";
+            DOM.timeDisplay.innerText = "60";
+            
+            loadQuestion();
+            startTimer();
+        }
+
+        // --- 5. MediaPipe Result & Render Loop ---
+
+        function onResults(results) {
+            state.faceMeshResults = results;
+        }
+
+        let particles = [];
+        function createParticles(xPercent, yPercent, color) {
+            const x = (xPercent / 100) * DOM.canvas.width;
+            const y = (yPercent / 100) * DOM.canvas.height;
+            for(let i=0; i<30; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function drawLoop(currentTime) {
+            // Calculate FPS
+            const deltaTime = currentTime - state.lastFrameTime;
+            state.fps = Math.round(1000 / deltaTime);
+            state.lastFrameTime = currentTime;
+            if(currentTime % 10 === 0) DOM.fpsCounter.innerText = state.fps;
+
+            const ctx = DOM.ctx;
+            const canvas = DOM.canvas;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Video Background Directly from Webcam Stream (Prevents freezes & lag)
+            let drawWidth = 0, drawHeight = 0, offsetX = 0, offsetY = 0;
+            const hasVideo = DOM.video && DOM.video.readyState >= 2;
+
+            if (hasVideo) {
+                const vWidth = DOM.video.videoWidth || state.videoWidth;
+                const vHeight = DOM.video.videoHeight || state.videoHeight;
+                const imgRatio = vWidth / vHeight;
+                const canvasRatio = canvas.width / canvas.height;
+
+                if (canvasRatio > imgRatio) {
+                    drawWidth = canvas.width;
+                    drawHeight = canvas.width / imgRatio;
+                    offsetX = 0;
+                    offsetY = (canvas.height - drawHeight) / 2;
+                } else {
+                    drawWidth = canvas.height * imgRatio;
+                    drawHeight = canvas.height;
+                    offsetX = (canvas.width - drawWidth) / 2;
+                    offsetY = 0;
+                }
+
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1); 
+                ctx.drawImage(DOM.video, offsetX, offsetY, drawWidth, drawHeight);
+                ctx.restore();
+            }
+
+            // Game Logic & AR Overlays
+            if (state.isPlaying && state.faceMeshResults && state.faceMeshResults.multiFaceLandmarks && state.faceMeshResults.multiFaceLandmarks.length > 0) {
+                const landmarks = state.faceMeshResults.multiFaceLandmarks[0];
+                
+                // Draw Face Mesh wireframe (Subtle)
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                ctx.strokeStyle = "rgba(52, 211, 153, 0.3)";
+                ctx.lineWidth = 1;
+                
+                // Helper to draw lines
+                const drawLine = (p1, p2) => {
+                    ctx.beginPath();
+                    const x1 = offsetX + landmarks[p1].x * drawWidth;
+                    const y1 = offsetY + landmarks[p1].y * drawHeight;
+                    const x2 = offsetX + landmarks[p2].x * drawWidth;
+                    const y2 = offsetY + landmarks[p2].y * drawHeight;
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                };
+
+                // Draw nose bridge
+                drawLine(10, 151); drawLine(151, 9); drawLine(9, 8);
+                // Draw face oval approx
+                drawLine(10, 338); drawLine(338, 297); drawLine(297, 332);
+                drawLine(10, 109); drawLine(109, 67); drawLine(67, 103);
+                
+                ctx.restore();
+
+                // --- Tilt Logic ---
+                if (state.inputMode === 'AR' && !state.isProcessingAnswer) {
+                    // Points 33 and 263 are roughly temple/eye-corners
+                    const leftEye = landmarks[33];
+                    const rightEye = landmarks[263];
+                    
+                    const dy = rightEye.y - leftEye.y;
+                    const dx = rightEye.x - leftEye.x;
+                    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+                    // Note: Coordinates are mirrored
+                    let currentZone = 'center';
+                    if (angle > 10) currentZone = 'right'; // Tilted head to the right (user's perspective)
+                    else if (angle < -10) currentZone = 'left';
+
+                    if (currentZone === state.tiltDirection && currentZone !== 'center') {
+                        state.tiltHoldTime++;
+                        if (state.tiltHoldTime >= state.tiltThreshold) {
+                            checkAnswer(currentZone);
+                        }
+                    } else {
+                        state.tiltDirection = currentZone;
+                        state.tiltHoldTime = 0;
+                    }
+
+                    updateZoneVisuals(currentZone);
+                }
+            }
+
+            // Draw Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.life * 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.2; // Gravity
+                p.life -= 0.02;
+                
+                if(p.life <= 0) particles.splice(i, 1);
+            }
+            ctx.globalAlpha = 1.0;
+
+            requestAnimationFrame(drawLoop);
+        }
+
+    </script>
+</body>
+</html>
